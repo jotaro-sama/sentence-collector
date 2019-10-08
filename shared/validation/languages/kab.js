@@ -4,7 +4,7 @@ import tokenizeWords from 'talisman/tokenizers/words';
 const MIN_WORDS = 1;
 
 // Maximum of words allowed per sentence to keep recordings in a manageable duration.
-const MAX_WORDS = 14;
+const MAX_WORDS = 20;
 
 // Numbers that are not allowed in a sentence depending on the language. For
 // English this is 0-9 once or multiple times after each other.

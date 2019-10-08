@@ -12,6 +12,12 @@ const CV_LANGUAGES_URL = 'https://raw.githubusercontent.com/mozilla/voice-web/ma
 const OUTPUT_JSON = 'sentence-collector.json';
 const OUTPUT_TXT = 'sentence-collector.txt';
 
+// Mapping from PONTOON locale -> database locale code
+const LANGUAGE_MAPPING = {
+  'ne-NP': 'ne',
+  'sv-SE': 'sv',
+};
+
 export async function startExport(db, exportPath) {
   const startTime = Date.now();
   const cvResponse = await fetch(CV_LANGUAGES_URL);
@@ -28,6 +34,7 @@ export async function startExport(db, exportPath) {
 async function exportLanguage(db, languageCode, exportPath) {
   console.log(`Starting export for ${languageCode}..`);
   const cvPath = `${exportPath}/${languageCode}`;
+  const dbLanguageCode = LANGUAGE_MAPPING[languageCode] || languageCode;
 
   const pathExists = existsSync(cvPath);
 
@@ -40,7 +47,7 @@ async function exportLanguage(db, languageCode, exportPath) {
 
   let approvedSentences = [];
   try {
-    approvedSentences = await db.getAllValidatedSentences(languageCode);
+    approvedSentences = await db.getAllValidatedSentences(dbLanguageCode);
   } catch (err) { /* ignore for now, as we also get this if the code does not exist */ }
 
   if (!approvedSentences || approvedSentences.length === 0) {
@@ -49,7 +56,7 @@ async function exportLanguage(db, languageCode, exportPath) {
 
   console.log(`  - Found ${approvedSentences.length} approved sentences`);
 
-  const validatedSentences = getValidatedSentences(languageCode, approvedSentences);
+  const validatedSentences = getValidatedSentences(dbLanguageCode, approvedSentences);
 
   if (!validatedSentences) {
     console.log(`  - Found no valid sentences, not writing any output..`);
@@ -61,8 +68,8 @@ async function exportLanguage(db, languageCode, exportPath) {
 
   console.log(`  - Cleaning up sentences`);
   const sentencesOnly = validatedSentences.map((sentenceMeta) => sentenceMeta.sentence);
-  const cleanedUpSentences = cleanup.cleanupSentences(languageCode, sentencesOnly);
-  const dedupedSentences = dedupeSentences(languageCode, cleanedUpSentences, cvPath);
+  const cleanedUpSentences = cleanup.cleanupSentences(dbLanguageCode, sentencesOnly);
+  const dedupedSentences = dedupeSentences(dbLanguageCode, cleanedUpSentences, cvPath);
 
   console.log(`  - Writing all sentences to ${dataPath}..`);
   writeFileSync(dataPath, dedupedSentences.join('\n'));
@@ -83,10 +90,18 @@ function getValidatedSentences(languageCode, sentences) {
 }
 
 function dedupeSentences(languageCode, sentences, path) {
-  const alreadyExistingSentences = getCVSentencesFor(languageCode, path);
-  const nonDupes = sentences.filter((sentence) => !alreadyExistingSentences.includes(sentence));
-  console.log(`  - Got ${nonDupes.length} sentences not already existing in CV..`);
-  return nonDupes;
+  const alreadyExistingCVSentences = getCVSentencesFor(languageCode, path);
+  const dedupedSentences = Array.from(new Set(sentences));
+  const numberOfDupes = sentences.length - dedupedSentences.length;
+  console.log(`  - Got ${numberOfDupes} duplicated sentences in Sentence Collector..`);
+
+  const cvSentences = alreadyExistingCVSentences.reduce((acc, sentence) => {
+    acc[sentence] = true;
+    return acc;
+  }, {});
+  const notAlreadyExistingInCV = dedupedSentences.filter((sentence) => !cvSentences.hasOwnProperty(sentence));
+  console.log(`  - Got ${notAlreadyExistingInCV.length} sentences not already existing in CV..`);
+  return notAlreadyExistingInCV;
 }
 
 function getCVSentencesFor(languageCode, path) {

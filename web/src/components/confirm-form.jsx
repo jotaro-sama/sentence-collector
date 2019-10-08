@@ -1,22 +1,23 @@
 import React from 'react';
-import { connect } from 'react-redux';
 
 import ReviewLink from './review-link';
 import SpinnerButton from './spinner-button';
-
-function mapStateToProps(state) {
-  return {
-    pendingSentences: state.pendingSentences,
-  };
-}
 
 class ConfirmForm extends React.Component {
   constructor(props) {
     super(props);
 
-    this.onSubmit = this.props.onSubmit.bind(this);
+    this.state = {};
+    this.onSubmit = this.onSubmit.bind(this);
     this.onReview = this.props.onReview.bind(this);
-    this.onCancel = this.props.onCancel.bind(this);
+  }
+
+  onSubmit(evt) {
+    this.setState({
+      pendingSentences: true,
+    });
+
+    this.props.onSubmit(evt);
   }
 
   render() {
@@ -28,7 +29,6 @@ class ConfirmForm extends React.Component {
       validated,
       unreviewed,
       readyCount,
-      pendingSentences,
     } = this.props;
 
     return (
@@ -73,31 +73,29 @@ class ConfirmForm extends React.Component {
 
         <section id="confirm-buttons">
 
-          { pendingSentences ? 
+          { this.state.pendingSentences ?
             <SpinnerButton></SpinnerButton> :
             <button type="submit" disabled={readyCount === 0}>Confirm</button>
           }
 
-          <button onClick={this.onCancel}>Cancel</button>
-
-          { pendingSentences && (
+          { this.state.pendingSentences && (
             <div>
               <p className="loadingText">Sentences are being uploaded. This can take several minutes depending on the number of sentences added.
             Please don't close this website.
               </p>
             </div>
           )}
-          
+
         </section>
 
         { Object.keys(filtered).length > 0 && (
           <section>
-            <h2>Filtered sentences due to requirements failing:</h2>
+            <h2>Filtered sentences due to requirements failing (please submit fixed versions as new sentences):</h2>
             <p>Please check the <a href="https://common-voice.github.io/sentence-collector/#/how-to">guidelines</a>.</p>
 
             {
               Object.keys(filtered).map((filterKey) => (
-                <React.Fragment>
+                <React.Fragment key={'fragment-' + filterKey}>
                   <h3 key="{filterKey}">{ filterKey }</h3>
                   {
                     filtered[filterKey].map((filteredSentence) =>
@@ -114,4 +112,4 @@ class ConfirmForm extends React.Component {
   }
 }
 
-export default connect(mapStateToProps)(ConfirmForm);
+export default ConfirmForm;

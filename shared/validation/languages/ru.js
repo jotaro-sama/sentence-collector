@@ -10,11 +10,6 @@ const MAX_WORDS = 14;
 // English this is 0-9 once or multiple times after each other.
 const NUMBERS_REGEX = /[0-9]+/;
 
-// Some languages want to check the structure, this is what this REGEX is for. For English
-// (and by extend as default) we're not currently using it.
-/* eslint-disable-next-line no-unused-vars */
-const STRUCTURE_REGEX = undefined;
-
 // The following symbols are disallowed, please update here as well and not just the regex
 // to make it easier to read:
 // < > + * \ # @ ^ [ ] ( ) /
@@ -24,7 +19,10 @@ const SYMBOL_REGEX = /[<>\+\*\\#@\^\[\]\(\)\/]/;
 // inbetween are considered abbreviations or acronyms.
 // This currently also matches fooBAR but we most probably don't want that either
 // as users wouldn't know how to pronounce the uppercase letters.
-const ABBREVIATION_REGEX = /[A-Z]{2,}|[A-Z]+\.*[A-Z]+/;
+const ABBREVIATION_REGEX = /[А-Я]{2,}|[А-Я]+\.*[А-Я]+/;
+
+const ENGLISH_ALPHABETS_REGEX = /[a-zA-Z]/;
+
 
 export function filterNumbers(sentence) {
   return !sentence.match(NUMBERS_REGEX);
@@ -38,9 +36,8 @@ export function filterSymbols(sentence) {
   return !sentence.match(SYMBOL_REGEX);
 }
 
-/* eslint-disable-next-line no-unused-vars */
-export function filterStructure(sentence) {
-  return true;
+export function filterEnglishCharacters(sentence) {
+  return !sentence.match(ENGLISH_ALPHABETS_REGEX);
 }
 
 export function filterLength(sentence) {

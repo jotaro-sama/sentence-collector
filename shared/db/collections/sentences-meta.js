@@ -57,7 +57,7 @@ export default class SentencesMeta {
   async deleteSentenceRecords(bucket) {
     const languages = getAllLanguages();
     for (const language of languages) {
-      const records = await this.getAll(language.code);
+      const records = await this.getAllPaginated(language.code);
       const collectionName = await this.getCollectionName(language.code);
       console.log(`Found ${records.length} records to delete for ${language.code}`);
       await bucket.batch(b => {
@@ -66,6 +66,184 @@ export default class SentencesMeta {
         }
       });
     }
+  }
+
+  async deleteSpecificSentenceRecords(bucket, locale, username) {
+    const collectionName = await this.getCollectionName(locale);
+    const records = await this.getAllUnapprovedByUsername(locale, username);
+    const minifiedRecords = records.map((record) => ({ id: record.id, sentence: record.sentence }));
+    console.log(`Found ${minifiedRecords.length} records to delete for ${locale} with username ${username}`);
+    await bucket.batch(b => {
+      for (let i = 0; i < minifiedRecords.length; i++) {
+        console.log('Deleting', minifiedRecords[i]);
+        b.collection(collectionName).deleteRecord(minifiedRecords[i].id);
+      }
+    });
+  }
+
+  async forceDeleteSentences(bucket, locale, sentences) {
+    const collectionName = await this.getCollectionName(locale);
+    const records = await this.getAllPaginated(locale);
+    const minifiedRecords = records.map((record) => ({ id: record.id, sentence: record.sentence }));
+    const { foundSentences, errorSentences } = sentences.reduce((acc, sentence) => {
+      const foundSentence = minifiedRecords.find((record) => record.sentence === sentence);
+      if (!foundSentence) {
+        acc.errorSentences.push(sentence);
+        return acc;
+      }
+
+      acc.foundSentences.push(foundSentence);
+      return acc;
+    }, { foundSentences: [], errorSentences: [] });
+    console.log(`Found ${foundSentences.length} records to delete for ${locale}`);
+
+    await bucket.batch(b => {
+      for (let i = 0; i < foundSentences.length; i++) {
+        console.log('Deleting', foundSentences[i]);
+        b.collection(collectionName).deleteRecord(foundSentences[i].id);
+      }
+    });
+
+    console.log('All deleted, except the following sentences which could not be found:');
+    errorSentences.forEach((sentence) => console.error(sentence));
+  }
+
+  async forceDeleteSpecificSentenceRecords(bucket, locale, username) {
+    const collectionName = await this.getCollectionName(locale);
+    const records = await this.getAllByUsername(locale, username);
+    const minifiedRecords = records.map((record) => ({ id: record.id, sentence: record.sentence }));
+    console.log(`Found ${minifiedRecords.length} records to delete for ${locale} with username ${username}`);
+    await bucket.batch(b => {
+      for (let i = 0; i < minifiedRecords.length; i++) {
+        console.log('Deleting', minifiedRecords[i]);
+        b.collection(collectionName).deleteRecord(minifiedRecords[i].id);
+      }
+    });
+  }
+
+  async correctApprovals(locale) {
+    const collection = await this.getCollection(locale);
+    const records = await this.getAllPaginated(locale);
+    console.log(`Found ${records.length} records to analyze for ${locale}`);
+
+    const adjustedSentences = records.map((record) => {
+      const isApproved = this.checkIfApproved(record);
+      if (typeof isApproved === 'undefined' || isApproved === record.approved) {
+        // nothing to do here
+        return;
+      }
+
+      record.approved = isApproved;
+      record.approvalDate = Date.now();
+
+      return record;
+    }).filter(Boolean);
+
+    console.log(`Found ${adjustedSentences.length} to adjust`);
+
+    const results = await collection.batch(c => {
+      adjustedSentences.forEach(record => {
+        c.updateRecord(record, {
+          safe: true,
+          last_modified: record.last_modified,
+        });
+      });
+    });
+
+    const adjustedResults = [];
+    const errors = [];
+    results.forEach(result => {
+      if (result.status === 200) {
+        adjustedResults.push(result.body.data);
+      } else {
+        console.error('Approval adjustment error', result.status, result.body);
+        errors.push(result);
+      }
+    });
+
+    if (adjustedResults.length > 0) {
+      console.log('All approvals adjusted:');
+      console.log(`Updated ${adjustedResults.length} records`);
+    }
+
+    if (errors.length > 0) {
+      console.log(`Errors updating ${errors.length} records!`);
+    }
+  }
+
+  async deleteVotes(locale, username, approvalOnly) {
+    const collection = await this.getCollection(locale);
+    const records = await this.getAllPaginated(locale);
+
+    const foundSentences = records.filter((record) => {
+      return record.valid.includes(username) || record.invalid.includes(username);
+    });
+
+    console.log(`Found ${foundSentences.length} to analyze`);
+
+    const adjustedSentences = foundSentences.map((record) => {
+      if (approvalOnly && !record.valid.includes(username)) {
+        // Nothing to do for this sentence as there is no approval
+        return;
+      }
+
+      if (record.valid.includes(username)) {
+        const index = record.valid.indexOf(username);
+        record.valid.splice(index, 1);
+        delete record[`Sentences_Meta_UserVote_${username}`];
+        delete record[`Sentences_Meta_UserVoteDate_${username}`];
+      }
+
+      if (!approvalOnly && record.invalid.includes(username)) {
+        const index = record.invalid.indexOf(username);
+        record.invalid.splice(index, 1);
+        delete record[`Sentences_Meta_UserVote_${username}`];
+        delete record[`Sentences_Meta_UserVoteDate_${username}`];
+      }
+
+      // Given that we manipulate votes, we need to re-write the
+      // approval.
+      const isApproved = this.checkIfApproved(record);
+      if (typeof isApproved === 'undefined') {
+        delete record.approved;
+        delete record.approvalDate;
+      } else {
+        record.approved = isApproved;
+        record.approvalDate = Date.now();
+      }
+
+      return record;
+    }).filter(Boolean);
+
+    console.log(`Found ${adjustedSentences.length} records to delete votes in ${locale} for ${username}`);
+
+    if (adjustedSentences.length === 0) {
+      return;
+    }
+
+    const results = await collection.batch(c => {
+      adjustedSentences.forEach(record => {
+        c.updateRecord(record, {
+          safe: true,
+          last_modified: record.last_modified,
+        });
+      });
+    });
+
+    const adjustedResults = [];
+    const errors = [];
+    results.forEach(result => {
+      if (result.status === 200 || result === 201) {
+        adjustedResults.push(result.body.data);
+      } else {
+        console.error('Voting deletion error', result.status, result.body);
+        errors.push(result);
+      }
+    });
+
+    console.log('All votes adjusted:');
+    console.log(`Updated ${adjustedResults.length} records`);
+    console.log(`Errors updating ${errors.length} records!`);
   }
 
   async createAllCollections(bucket) {
@@ -110,6 +288,56 @@ export default class SentencesMeta {
     const collection = await this.getCollection(language);
     const result = await collection.listRecords();
     return result.data;
+  }
+
+  async getAllPaginated(language, filters = {}) {
+    const collection = await this.getCollection(language);
+
+    let { data, hasNextPage, next } = await collection.listRecords(filters);
+    while (hasNextPage) {
+      const result = await next();
+      data = data.concat(result.data);
+      hasNextPage = result.hasNextPage;
+      next = result.next;
+    }
+
+    return data;
+  }
+
+  getAllRejectedByUsername(languages, username) {
+    const promises = languages.map((language) => this.getAllUnapprovedByUsername(language, username));
+
+    return Promise.all(promises)
+      .then((unapprovedPerLanguage) => {
+        return unapprovedPerLanguage.reduce((rejectedSentences, unapproved, index) => {
+          if (unapproved && unapproved.length > 0) {
+            // we can use the index here, as Promise.all guarantees that its
+            // resolved values will be in the same order
+            rejectedSentences[languages[index]] = unapproved;
+          }
+
+          return rejectedSentences;
+        }, {});
+      });
+  }
+
+  async getAllUnapprovedByUsername(language, username) {
+    const collection = await this.getCollection(language);
+    const filters = {
+      username,
+      approved: false,
+    };
+    const result = await collection.listRecords({ filters });
+    const unapprovedSentencesWithoutDetail = result.data.map((record) => record.sentence);
+    return unapprovedSentencesWithoutDetail;
+  }
+
+  async getAllByUsername(language, username) {
+    const filters = {
+      username,
+    };
+
+    return this.getAllPaginated(language, filters);
   }
 
   async getLanguageAndSentenceCounts(bucket) {
@@ -169,17 +397,11 @@ export default class SentencesMeta {
   async getAllValidatedSentences(language) {
     const filters = {};
     filters.approved = true;
-    const collection = await this.getCollection(language);
 
-    let { data, hasNextPage, next } = await collection.listRecords({ filters });
-    while (hasNextPage) {
-      const result = await next();
-      data = data.concat(result.data);
-      hasNextPage = result.hasNextPage;
-      next = result.next;
-    }
+    const allRecords = await this.getAllPaginated(language, filters);
+    const approvedRecords = allRecords.filter((record) => this.checkIfApproved(record));
 
-    return data;
+    return approvedRecords;
   }
 
   prepareForSubmission(sentences) {
@@ -262,11 +484,13 @@ export default class SentencesMeta {
     const invalidVotes = record.invalid.length;
     const totalVotes = validVotes + invalidVotes;
 
-    if (totalVotes < APPROVAL_MIN_TOTAL_VOTES) {
-      return;
+    if(validVotes >= APPROVAL_MIN_VALID_VOTES) {
+      return true;
+    } else if(totalVotes >= APPROVAL_MIN_TOTAL_VOTES) {
+      return false;
     }
 
-    return validVotes >= APPROVAL_MIN_VALID_VOTES;
+    return;
   }
 
   async vote(language, validated, invalidated) {

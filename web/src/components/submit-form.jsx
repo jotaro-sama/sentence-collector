@@ -7,16 +7,24 @@ import SpinnerButton from './spinner-button';
 
 function mapStateToProps(state) {
   return {
-    parsingSentences: state.parsingSentences,
-    errorMessage: state.errorMessage,
-    sentenceSubmissionFailures: state.sentenceSubmissionFailures,
+    errorMessage: state.app.errorMessage,
+    sentenceSubmissionFailures: state.app.sentenceSubmissionFailures,
   };
 }
 
 class SubmitForm extends React.Component {
-  constructor(props) {
-    super(props);
-    this.onSubmit = this.props.onSubmit.bind(this);
+  constructor() {
+    super();
+    this.state = {};
+    this.onSubmit = this.onSubmit.bind(this);
+  }
+
+  onSubmit(evt) {
+    this.setState({
+      parsingSentences: true,
+    });
+
+    this.props.onSubmit(evt);
   }
 
   render() {
@@ -25,9 +33,10 @@ class SubmitForm extends React.Component {
       error,
       errorMessage,
       languages,
-      parsingSentences,
       sentenceSubmissionFailures,
     } = this.props;
+
+    const notError = !message && !error && !errorMessage;
 
     return (
       <form id="add-form" onSubmit={this.onSubmit}>
@@ -76,15 +85,15 @@ class SubmitForm extends React.Component {
         </section>
 
         <section id="confirm-buttons" className="divCenter">
-          { parsingSentences ?
+          { notError && this.state.parsingSentences ?
             <SpinnerButton></SpinnerButton> :
             <button>Submit</button>
-          } 
+          }
 
-          { parsingSentences && (
+          { notError && this.state.parsingSentences && (
             <div>
               <p className="loadingText">Sentences are being validated. This can take a few seconds depending on the number of sentences added.</p>
-            </div> 
+            </div>
           )}
         </section>
 
